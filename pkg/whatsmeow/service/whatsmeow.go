@@ -1223,6 +1223,29 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			}
 		}
 
+		// Trata o caso especial de mensagens fromMe onde o Chat (destinatário) veio como @lid
+		// mas o RecipientAlt traz o @s.whatsapp.net correspondente.
+		// Isso acontece quando um atendente responde manualmente pelo WhatsApp uma conversa
+		// cujo contato só é conhecido pelo WhatsApp através do LID nesse momento.
+		// Sem essa correção, o Chat fica com o @lid e nada que dependa do número de telefone
+		// real do contato (ex: fluxos de automação) consegue casar essa mensagem com a
+		// conversa correta.
+		if evt.Info.IsFromMe {
+			chatStrAfterSwap := evt.Info.Chat.String()
+			recipientAltStr := evt.Info.RecipientAlt.String()
+
+			if strings.Contains(chatStrAfterSwap, "@lid") && strings.Contains(recipientAltStr, "@s.whatsapp.net") {
+				mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Detected fromMe Chat/RecipientAlt LID swap case - Chat: %s, RecipientAlt: %s", mycli.userID, chatStrAfterSwap, recipientAltStr)
+
+				cleanRecipientAlt := cleanSenderID(recipientAltStr)
+				if cleanedWhatsAppJID, err := types.ParseJID(cleanRecipientAlt); err == nil {
+					evt.Info.Chat = cleanedWhatsAppJID
+				}
+
+				mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] fromMe Chat swap completed - New Chat: %s", mycli.userID, evt.Info.Chat.String())
+			}
+		}
+
 		// Auto-marca mensagens como lidas se configurado
 		if mycli.Instance.ReadMessages && !evt.Info.IsFromMe {
 			go func() {
