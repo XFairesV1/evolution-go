@@ -73,13 +73,16 @@ type CreateStruct struct {
 }
 
 type ConnectStruct struct {
-	WebhookUrl      string   `json:"webhookUrl"`
+	// Pointers so an omitted field ("connect with no body", e.g. a plain reconnect call) can be
+	// told apart from one explicitly cleared ("webhookUrl": ""). Connect() below only overwrites
+	// the instance's persisted value when the field was actually present in the request.
+	WebhookUrl      *string  `json:"webhookUrl"`
 	Subscribe       []string `json:"subscribe"`
 	Immediate       bool     `json:"immediate"`
 	Phone           string   `json:"phone"`
-	RabbitmqEnable  string   `json:"rabbitmqEnable"`
-	WebSocketEnable string   `json:"websocketEnable"`
-	NatsEnable      string   `json:"natsEnable"`
+	RabbitmqEnable  *string  `json:"rabbitmqEnable"`
+	WebSocketEnable *string  `json:"websocketEnable"`
+	NatsEnable      *string  `json:"natsEnable"`
 }
 
 type StatusStruct struct {
@@ -230,10 +233,18 @@ func (i instances) Connect(data *ConnectStruct, instance *instance_model.Instanc
 	eventString := strings.Join(subscribedEvents, ",")
 
 	instance.Events = eventString
-	instance.Webhook = data.WebhookUrl
-	instance.RabbitmqEnable = data.RabbitmqEnable
-	instance.NatsEnable = data.NatsEnable
-	instance.WebSocketEnable = data.WebSocketEnable
+	if data.WebhookUrl != nil {
+		instance.Webhook = *data.WebhookUrl
+	}
+	if data.RabbitmqEnable != nil {
+		instance.RabbitmqEnable = *data.RabbitmqEnable
+	}
+	if data.NatsEnable != nil {
+		instance.NatsEnable = *data.NatsEnable
+	}
+	if data.WebSocketEnable != nil {
+		instance.WebSocketEnable = *data.WebSocketEnable
+	}
 
 	err := i.instanceRepository.Update(instance)
 	if err != nil {
