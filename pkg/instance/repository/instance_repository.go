@@ -116,9 +116,15 @@ func (i *instanceRepository) UpdateJid(userId string, jid string) error {
 	return i.db.Model(&instance_model.Instance{}).Where("id = ?", userId).Update("jid", jid).Error
 }
 
+// GetAllConnectedInstances returns instances that hold a paired WhatsApp session (non-empty
+// jid), used by ConnectOnStartup to decide which instances to resume. It deliberately does NOT
+// filter on the `connected` column: that flag is flipped to false the instant a websocket drops
+// (see whatsmeow.service events.Disconnected/ConnectFailure/LoggedOut handlers) and stays false
+// until a reconnect succeeds, so an instance that was mid-reconnect (or stuck) when the process
+// was restarted would otherwise never be resumed on boot even though its session is still valid.
 func (i *instanceRepository) GetAllConnectedInstances() ([]*instance_model.Instance, error) {
 	var instances []*instance_model.Instance
-	err := i.db.Where("connected = ?", true).Find(&instances).Error
+	err := i.db.Where("jid <> ?", "").Find(&instances).Error
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +134,7 @@ func (i *instanceRepository) GetAllConnectedInstances() ([]*instance_model.Insta
 
 func (i *instanceRepository) GetAllConnectedInstancesByClientName(clientName string) ([]*instance_model.Instance, error) {
 	var instances []*instance_model.Instance
-	err := i.db.Where("connected = ? AND client_name = ?", true, clientName).Find(&instances).Error
+	err := i.db.Where("jid <> ? AND client_name = ?", "", clientName).Find(&instances).Error
 	if err != nil {
 		return nil, err
 	}

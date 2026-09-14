@@ -2004,12 +2004,30 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.Instance.Id, err)
 		}
 
-		// Trigger instance restart via websocket-capable service (non-blocking)
+		// Trigger instance restart via websocket-capable service (non-blocking), retrying with
+		// backoff instead of a single fire-and-forget attempt. A lone failed attempt here (e.g. a
+		// transient network blip while WhatsApp's servers were also flapping) used to leave the
+		// instance permanently stuck at disconnect_reason="Reconnecting" with connected=false and
+		// nothing else ever trying again, until someone noticed and called /instance/connect by hand.
 		go func(instanceID string) {
-			mycli.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Disconnected detected, restarting instance", instanceID)
-			if err := mycli.service.ReconnectClient(instanceID); err != nil {
-				mycli.loggerWrapper.GetLogger(instanceID).LogError("[%s] Failed to restart instance: %v", instanceID, err)
+			backoffs := []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second, 30 * time.Second, time.Minute}
+			for attempt, delay := range backoffs {
+				mycli.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Disconnected detected, restarting instance (attempt %d/%d)", instanceID, attempt+1, len(backoffs))
+				if err := mycli.service.ReconnectClient(instanceID); err != nil {
+					mycli.loggerWrapper.GetLogger(instanceID).LogError("[%s] Failed to restart instance (attempt %d/%d): %v", instanceID, attempt+1, len(backoffs), err)
+					time.Sleep(delay)
+					continue
+				}
+
+				instance, err := mycli.instanceRepository.GetInstanceByID(instanceID)
+				if err == nil && instance.Connected {
+					mycli.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Auto-reconnect succeeded on attempt %d/%d", instanceID, attempt+1, len(backoffs))
+					return
+				}
+
+				time.Sleep(delay)
 			}
+			mycli.loggerWrapper.GetLogger(instanceID).LogError("[%s] Auto-reconnect gave up after %d attempts, instance left disconnected until manually reconnected", instanceID, len(backoffs))
 		}(mycli.userID)
 	case *events.LabelEdit:
 		doWebhook = true
